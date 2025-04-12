@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,13 +24,14 @@ const (
 	VK_LSHIFT      = 0xA0 // Left Shift key
 	VK_RSHIFT      = 0xA1 // Right Shift key
 	maxHistorySize = 100
-	pollInterval   = 2000 * time.Millisecond
+	pollInterval   = 500 * time.Millisecond // Reduced from 2000ms to 500ms
 )
 
 var (
 	clipboardHistory []string
 	lastClipboard    string
 	currentString    string
+	historyMutex     sync.RWMutex
 )
 
 func isKeyPressed(key int) bool {
@@ -74,11 +76,11 @@ func main() {
 				fmt.Println("Alt pressed - tracking 'q' presses")
 			} else if !altDown && altPressed {
 				fmt.Printf("Alt released - 'q' was pressed %d times while Alt was held\n", qCount)
-				if currentString !=lastClipboard {
+				if currentString != lastClipboard {
 					clipboard.WriteAll(currentString)
-					lastClipboard=currentString
+					lastClipboard = currentString
 				}
-				
+
 				window.Hide()
 				isWindowVisible = false
 				altPressed = false
@@ -90,15 +92,21 @@ func main() {
 				if qDown && !qPressed {
 					qCount++
 					fmt.Printf("'q' pressed while Alt is held (count: %d)\n", qCount)
+					fmt.Printf("%d is the length of clipboard History", len(clipboardHistory))
 
-					if shiftPressed {
+					if len(clipboardHistory) == 0 {
+						dataLabel.SetText("Clipboard is empty")
+						currentString = ""
+						time.Sleep(1000 * time.Millisecond)
+					} else if shiftPressed {
 						currentIndex = (currentIndex - 1 + len(clipboardHistory)) % len(clipboardHistory)
+						dataLabel.SetText(clipboardHistory[currentIndex])
+						currentString = clipboardHistory[currentIndex]
 					} else {
 						currentIndex = (qCount - 1) % len(clipboardHistory)
+						dataLabel.SetText(clipboardHistory[currentIndex])
+						currentString = clipboardHistory[currentIndex]
 					}
-
-					dataLabel.SetText(clipboardHistory[currentIndex])
-					currentString = clipboardHistory[currentIndex]
 
 					if !isWindowVisible {
 						window.Show()
@@ -126,63 +134,55 @@ func main() {
 
 }
 
-func copyFromControlC() {
-	curr, err := clipboard.ReadAll()
-	if err != nil {
-		fmt.Printf("Error reading clipboard: %v\n", err)
-
-	}
-	if lastClipboard != curr && curr != "" {
-		clipboardHistory = append([]string{curr}, clipboardHistory...)
-		if len(clipboardHistory) > maxHistorySize {
-			clipboardHistory = clipboardHistory[:maxHistorySize]
-		}
-		lastClipboard = curr
-	}
-}
-
 func monitorClipboard() {
 	for {
 		current, err := clipboard.ReadAll()
 		if err != nil {
 			fmt.Printf("Error reading clipboard: %v\n", err)
+			time.Sleep(pollInterval)
 			continue
 		}
 
+		historyMutex.Lock()
 		if current != lastClipboard && current != "" {
 			clipboardHistory = append([]string{current}, clipboardHistory...)
-
 			if len(clipboardHistory) > maxHistorySize {
 				clipboardHistory = clipboardHistory[:maxHistorySize]
 			}
-
 			lastClipboard = current
 		}
+		historyMutex.Unlock()
 
 		time.Sleep(pollInterval)
-
 	}
 }
 
 func registerHotkeys() {
 	fmt.Println("--- Press Shift+alt+1-9 to paste from history ---")
 
+	// Pre-create the hotkey handlers to avoid creating closures in the loop
+	hotkeyHandlers := make(map[string]func(hook.Event))
 	for i := 1; i <= 9; i++ {
 		key := fmt.Sprintf("%d", i)
-		hook.Register(hook.KeyDown, []string{key, "shift", "alt"}, func(e hook.Event) {
+		hotkeyHandlers[key] = func(e hook.Event) {
 			keyStr := string(e.Rawcode)
 			pasteFromHistory(keyStr)
-		})
+		}
 	}
-	hook.Register(hook.KeyDown, []string{"ctrl", "c"}, func(e hook.Event) {
-		copyFromControlC()
-	})
+
+	for i := 1; i <= 9; i++ {
+		key := fmt.Sprintf("%d", i)
+		hook.Register(hook.KeyDown, []string{key, "shift", "alt"}, hotkeyHandlers[key])
+	}
 
 	s := hook.Start()
 	<-hook.Process(s)
 }
 
 func pasteFromHistory(keyStr string) {
+	historyMutex.RLock()
+	defer historyMutex.RUnlock()
+
 	if len(clipboardHistory) == 0 {
 		fmt.Println("Clipboard history is empty")
 		return
