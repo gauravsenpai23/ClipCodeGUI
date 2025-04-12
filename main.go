@@ -74,7 +74,11 @@ func main() {
 				fmt.Println("Alt pressed - tracking 'q' presses")
 			} else if !altDown && altPressed {
 				fmt.Printf("Alt released - 'q' was pressed %d times while Alt was held\n", qCount)
-				clipboard.WriteAll(currentString)
+				if currentString !=lastClipboard {
+					clipboard.WriteAll(currentString)
+					lastClipboard=currentString
+				}
+				
 				window.Hide()
 				isWindowVisible = false
 				altPressed = false
