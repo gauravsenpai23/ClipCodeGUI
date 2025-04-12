@@ -78,7 +78,6 @@ func main() {
 				fmt.Printf("Alt released - 'q' was pressed %d times while Alt was held\n", qCount)
 				if currentString != lastClipboard {
 					clipboard.WriteAll(currentString)
-					lastClipboard = currentString
 				}
 
 				window.Hide()
@@ -92,8 +91,6 @@ func main() {
 				if qDown && !qPressed {
 					qCount++
 					fmt.Printf("'q' pressed while Alt is held (count: %d)\n", qCount)
-					fmt.Printf("%d is the length of clipboard History", len(clipboardHistory))
-
 					if len(clipboardHistory) == 0 {
 						dataLabel.SetText("Clipboard is empty")
 						currentString = ""
